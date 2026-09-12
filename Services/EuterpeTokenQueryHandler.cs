@@ -25,14 +25,7 @@ public sealed class EuterpeTokenQueryHandler : DelegatingHandler
         var token = await authService.GetAccessTokenAsync().ConfigureAwait(false);
         request.RequestUri = AppendToken(request.RequestUri, token);
 
-        var response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
-        if (response.StatusCode is not HttpStatusCode.Unauthorized)
-            return response;
-
-        response.Dispose();
-        RuntimeLog.Write("EuterpeAuth", $"Download request returned 401: {request.RequestUri.GetLeftPart(UriPartial.Path)}");
-        token = await authService.RenewAccessTokenAsync(token).ConfigureAwait(false);
-        request.RequestUri = AppendToken(request.RequestUri, token);
+        // Euterpe 谱面下载的回退次数由下载服务统一控制，401 也不能在此隐式补发请求。
         return await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
     }
 

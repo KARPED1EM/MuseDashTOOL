@@ -21,6 +21,8 @@ public sealed class AuthHeaderHandler : DelegatingHandler
     protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
     {
         EuterpeRateLimitGate.ThrowIfBlocked();
+        await EuterpeApiRequestPacer.WaitAsync(cancellationToken).ConfigureAwait(false);
+        EuterpeRateLimitGate.ThrowIfBlocked();
 
         // 自动注入 X-Request-Id 请求头
         if (!request.Headers.Contains("X-Request-Id"))

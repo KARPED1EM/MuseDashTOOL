@@ -162,7 +162,7 @@ public partial class WelcomeViewModel : ViewModelBase
         if (_configService == null) return;
         var gamePath = _configService.Config.GamePath;
         GamePath = gamePath;
-        IsGamePathValid = _gamePathService != null && _gamePathService.IsValidGamePath(gamePath);
+        IsGamePathValid = _gamePathService != null && await Task.Run(() => _gamePathService.IsValidGamePath(gamePath));
 
         if (!IsGamePathValid) return;
 

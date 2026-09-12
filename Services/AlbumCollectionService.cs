@@ -112,7 +112,8 @@ public class AlbumCollectionService : IAlbumCollectionService
         "Yufans精选集",
         "happy幕城",
         "小火-Aioser的个人仓库",
-        "不是给佬的厕所"
+        "不是给佬的厕所",
+        "小鸟的鸟窝"
     };
 
     public static readonly HashSet<string> PersonalRepositoryNames = new(PersonalRepositoryDisplayOrder, StringComparer.OrdinalIgnoreCase);

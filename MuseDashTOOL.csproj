@@ -17,9 +17,12 @@
     <PublishTrimmed>false</PublishTrimmed>
     <SelfContained>true</SelfContained>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <CetCompat>false</CetCompat>
     <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
     <PublishDir>publish_output\</PublishDir>
     <OptimizationPreference>Size</OptimizationPreference>
+    <DebugType>none</DebugType>
+    <DebugSymbols>false</DebugSymbols>
     <StripSymbols>true</StripSymbols>
     <NoWarn>$(NoWarn);NU1900</NoWarn>
   </PropertyGroup>
@@ -41,6 +44,8 @@
     <PackageReference Include="AnimatedImage.Avalonia" Version="2.1.4" />
     <PackageReference Include="AsyncImageLoader.Avalonia" Version="3.7.0" />
     <PackageReference Include="Avalonia" Version="11.3.12" />
+    <!-- 单文件发布时，欢迎页的祖先窗口绑定会在运行时解析该程序集。 -->
+    <PackageReference Include="Avalonia.Controls.ColorPicker" Version="11.3.12" />
     <PackageReference Include="Avalonia.Desktop" Version="11.3.12" />
     <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.12" />
     <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.12" />

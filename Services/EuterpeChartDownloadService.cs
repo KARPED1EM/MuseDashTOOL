@@ -1,4 +1,6 @@
 using System.IO.Compression;
+using System.Net.Http.Headers;
+using System.Text.Json;
 using System.Text.Json.Nodes;
 using MdModManager.Helpers;
 
@@ -18,17 +20,28 @@ public interface IEuterpeChartDownloadService
 public sealed class EuterpeChartDownloadService : IEuterpeChartDownloadService, IDisposable
 {
     public const string DownloadScheme = "euterpe-chart";
+    private const string ApiBaseUrl = "https://euterpe-org.com/api/";
     private const string DownloadBaseUrl = "https://dl.euterpe-org.com/files/charts/";
+    private const string DownloadRootUrl = "https://dl.euterpe-org.com/files/";
     private const string ManifestFileName = "manifest.epk";
     private readonly HttpClient _httpClient;
+    private readonly HttpClient _zipHttpClient;
+    private readonly IAuthService _authService;
 
-    public EuterpeChartDownloadService(EuterpeTokenQueryHandler tokenQueryHandler)
+    public EuterpeChartDownloadService(EuterpeTokenQueryHandler tokenQueryHandler, IAuthService authService)
     {
+        _authService = authService;
         _httpClient = new HttpClient(tokenQueryHandler)
         {
             Timeout = TimeSpan.FromMinutes(10)
         };
-        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("MuseDashTOOL/1.5.5");
+        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(EuterpeClientIdentity.UserAgent);
+
+        _zipHttpClient = new HttpClient
+        {
+            Timeout = TimeSpan.FromMinutes(10)
+        };
+        _zipHttpClient.DefaultRequestHeaders.UserAgent.ParseAdd(EuterpeClientIdentity.UserAgent);
     }
 
     public static string CreateTaskUrl(long cid) => $"{DownloadScheme}://charts/{cid}";
@@ -47,6 +60,45 @@ public sealed class EuterpeChartDownloadService : IEuterpeChartDownloadService, 
         string outputPath,
         IProgress<EuterpeChartDownloadProgress>? progress = null,
         CancellationToken ct = default)
+    {
+        try
+        {
+            await DownloadManifestToMdmAsync(cid, outputPath, progress, ct).ConfigureAwait(false);
+            return;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception manifestException)
+        {
+            // 文件服务异常时仅回退一次到网站的 ZIP 构建接口，不在此处重试。
+            RuntimeLog.Write("EuterpeDownload", $"Manifest download failed for chart {cid}; trying ZIP build once: {manifestException.Message}");
+            TryDeleteFile(outputPath);
+
+            try
+            {
+                await DownloadZipToMdmAsync(cid, outputPath, progress, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception zipException)
+            {
+                TryDeleteFile(outputPath);
+                throw new InvalidOperationException(
+                    $"Euterpe 文件服务下载失败（{manifestException.Message}）；ZIP 构建下载也失败（{zipException.Message}）",
+                    zipException);
+            }
+        }
+    }
+
+    private async Task DownloadManifestToMdmAsync(
+        long cid,
+        string outputPath,
+        IProgress<EuterpeChartDownloadProgress>? progress,
+        CancellationToken ct)
     {
         var workFolder = Path.Combine(Path.GetTempPath(), "MuseDashTOOL", "Euterpe", $"{cid}-{Guid.NewGuid():N}");
         Directory.CreateDirectory(workFolder);
@@ -93,6 +145,58 @@ public sealed class EuterpeChartDownloadService : IEuterpeChartDownloadService, 
         }
     }
 
+    private async Task DownloadZipToMdmAsync(
+        long cid,
+        string outputPath,
+        IProgress<EuterpeChartDownloadProgress>? progress,
+        CancellationToken ct)
+    {
+        EuterpeRateLimitGate.ThrowIfBlocked();
+        var token = await _authService.GetAccessTokenAsync().ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(token))
+            throw new InvalidOperationException("Euterpe 登录已失效，请退出账号后重新登录");
+
+        using var buildRequest = new HttpRequestMessage(HttpMethod.Post, $"{ApiBaseUrl}workspace/charts/{cid}/build-zip");
+        buildRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        buildRequest.Headers.Add("X-Request-Id", Guid.CreateVersion7().ToString());
+        using var buildResponse = await _zipHttpClient.SendAsync(buildRequest, ct).ConfigureAwait(false);
+        await EuterpeHttpError.EnsureSuccessAsync(buildResponse, "构建 Euterpe ZIP", ct).ConfigureAwait(false);
+
+        await using var buildStream = await buildResponse.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+        using var buildDocument = await JsonDocument.ParseAsync(buildStream, cancellationToken: ct).ConfigureAwait(false);
+        if (!buildDocument.RootElement.TryGetProperty("path", out var pathElement) ||
+            string.IsNullOrWhiteSpace(pathElement.GetString()))
+        {
+            throw new InvalidDataException("Euterpe ZIP 构建响应缺少下载路径");
+        }
+
+        var downloadUri = ResolveZipDownloadUri(pathElement.GetString()!);
+        var authorizedDownloadUri = AppendToken(downloadUri, token);
+        EuterpeRateLimitGate.ThrowIfBlocked();
+        using var downloadResponse = await _zipHttpClient.GetAsync(authorizedDownloadUri, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
+        await EuterpeHttpError.EnsureSuccessAsync(downloadResponse, "下载 Euterpe ZIP", ct).ConfigureAwait(false);
+
+        var totalBytes = downloadResponse.Content.Headers.ContentLength ?? 0;
+        progress?.Report(new EuterpeChartDownloadProgress(0, 1, 0, totalBytes));
+        await using (var source = await downloadResponse.Content.ReadAsStreamAsync(ct).ConfigureAwait(false))
+        await using (var destination = new FileStream(outputPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true))
+        {
+            var buffer = new byte[81920];
+            long downloadedBytes = 0;
+            int read;
+            while ((read = await source.ReadAsync(buffer.AsMemory(0, buffer.Length), ct).ConfigureAwait(false)) > 0)
+            {
+                await destination.WriteAsync(buffer.AsMemory(0, read), ct).ConfigureAwait(false);
+                downloadedBytes += read;
+                progress?.Report(new EuterpeChartDownloadProgress(0, 1, downloadedBytes, totalBytes));
+            }
+        }
+
+        ChartService.ConvertEpkToInfoJsonInPlace(outputPath);
+        ValidateConvertedPackage(outputPath);
+        progress?.Report(new EuterpeChartDownloadProgress(1, 1, totalBytes, totalBytes));
+    }
+
     private async Task DownloadFileAsync(long cid, string fileName, string destinationPath, CancellationToken ct)
     {
         var encodedName = string.Join('/', fileName.Replace('\\', '/').Split('/').Select(Uri.EscapeDataString));
@@ -102,6 +206,34 @@ public sealed class EuterpeChartDownloadService : IEuterpeChartDownloadService, 
         await using var source = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
         await using var destination = new FileStream(destinationPath, FileMode.Create, FileAccess.Write, FileShare.None, 81920, true);
         await source.CopyToAsync(destination, ct).ConfigureAwait(false);
+    }
+
+    private static Uri ResolveZipDownloadUri(string path)
+    {
+        if (Uri.TryCreate(path, UriKind.Absolute, out var absoluteUri))
+        {
+            if (absoluteUri.Scheme != Uri.UriSchemeHttps || !IsEuterpeHost(absoluteUri.Host))
+                throw new InvalidDataException("Euterpe ZIP 构建返回了不受信任的下载地址");
+            return absoluteUri;
+        }
+
+        if (path.StartsWith("/", StringComparison.Ordinal))
+            return new Uri(new Uri("https://euterpe-org.com"), path);
+
+        if (path.Contains("..", StringComparison.Ordinal))
+            throw new InvalidDataException("Euterpe ZIP 构建返回了无效的下载路径");
+
+        return new Uri(new Uri(DownloadRootUrl), path);
+    }
+
+    private static bool IsEuterpeHost(string host) =>
+        host.Equals("euterpe-org.com", StringComparison.OrdinalIgnoreCase) ||
+        host.EndsWith(".euterpe-org.com", StringComparison.OrdinalIgnoreCase);
+
+    private static Uri AppendToken(Uri uri, string token)
+    {
+        var separator = string.IsNullOrEmpty(uri.Query) ? "?" : "&";
+        return new Uri($"{uri}{separator}t={Uri.EscapeDataString(token)}");
     }
 
     private static string ResolveSafeFilePath(string root, string fileName)
@@ -144,7 +276,23 @@ public sealed class EuterpeChartDownloadService : IEuterpeChartDownloadService, 
         }
     }
 
-    public void Dispose() => _httpClient.Dispose();
+    private static void TryDeleteFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+                File.Delete(path);
+        }
+        catch
+        {
+        }
+    }
+
+    public void Dispose()
+    {
+        _httpClient.Dispose();
+        _zipHttpClient.Dispose();
+    }
 
     private sealed record ManifestFile(string Name, long Size);
 }

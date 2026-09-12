@@ -85,7 +85,7 @@ public partial class EuterpeViewModel : ObservableObject, IDisposable
     private const int SearchFetchSize = 50;
     private const int SearchFetchPages = 2;
     private const long EuterpeOfficialUserUid = 0;
-    private const string EuterpeBrowserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+    private const string EuterpeUserAgent = EuterpeClientIdentity.UserAgent;
 
     private readonly IAuthService _authService;
     private readonly AuthState _authState;
@@ -526,7 +526,7 @@ public partial class EuterpeViewModel : ObservableObject, IDisposable
         _httpClient = new HttpClient(authHeaderHandler) { BaseAddress = new Uri("https://euterpe-org.com/api/") };
         _downloadHttpClient = new HttpClient(tokenQueryHandler);
         // Euterpe 搜索接口只有浏览器 UA 会返回网页同款谱面集合。
-        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(EuterpeBrowserUserAgent);
+        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(EuterpeUserAgent);
     }
 
     // 初始化加载
@@ -611,6 +611,9 @@ public partial class EuterpeViewModel : ObservableObject, IDisposable
     [RelayCommand(CanExecute = nameof(CanLoadNext))]
     private async Task LoadNextPageAsync()
     {
+        if (CurrentPage >= _cursors.Count)
+            return;
+
         CurrentPage++;
         await ReloadAsync();
     }
@@ -680,6 +683,12 @@ public partial class EuterpeViewModel : ObservableObject, IDisposable
                 return;
             }
 
+            if (CurrentPage < 1 || CurrentPage > _cursors.Count)
+            {
+                CurrentPage = Math.Clamp(CurrentPage, 1, Math.Max(1, _cursors.Count - 1));
+                return;
+            }
+
             var cursor = _cursors[CurrentPage - 1];
 
             var path = BuildSearchPath(query, sort, cursor);
@@ -731,6 +740,8 @@ public partial class EuterpeViewModel : ObservableObject, IDisposable
         catch (OperationCanceledException) { }
         catch (Exception ex)
         {
+            // 请求失败时保留最后成功读取到游标的页码，避免下一次翻页访问不存在的游标。
+            CurrentPage = Math.Clamp(CurrentPage, 1, Math.Max(1, _cursors.Count - 1));
             RuntimeLog.Write("EuterpeViewModel", $"Loading charts failed: {ex}");
             var message = EuterpeHttpError.ToUserMessage(ex, "获取 Euterpe 谱面");
             StatusMessage = message;
@@ -1010,7 +1021,7 @@ public partial class EuterpeViewModel : ObservableObject, IDisposable
     {
         var snapshot = Charts.ToList();
         var client = new HttpClient();
-        client.DefaultRequestHeaders.Add("User-Agent", "MuseDashTOOL/1.5.5");
+        client.DefaultRequestHeaders.Add("User-Agent", EuterpeClientIdentity.UserAgent);
 
         foreach (var chart in snapshot)
         {

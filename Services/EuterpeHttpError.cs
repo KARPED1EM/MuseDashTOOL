@@ -3,6 +3,11 @@ using System.Text.Json;
 
 namespace MdModManager.Services;
 
+public static class EuterpeClientIdentity
+{
+    public const string UserAgent = "Euterpe";
+}
+
 public sealed class EuterpeHttpException : HttpRequestException
 {
     public EuterpeHttpException(HttpStatusCode statusCode, string message) : base(message, null, statusCode)
@@ -108,5 +113,30 @@ public static class EuterpeRateLimitGate
         var seconds = Math.Max(1, (int)Math.Ceiling(delay.TotalSeconds));
         RuntimeLog.Write("EuterpeRateLimit", $"Received 429. Retry-After={retryAfter?.ToString() ?? "missing"}; blocking API requests for {seconds}s.");
         return $"Euterpe 请求过于频繁，请在 {seconds} 秒后再试";
+    }
+}
+
+public static class EuterpeApiRequestPacer
+{
+    private static readonly SemaphoreSlim Gate = new(1, 1);
+    private static long _nextRequestUtcTicks;
+    private static readonly TimeSpan MinimumInterval = TimeSpan.FromSeconds(3);
+
+    public static async Task WaitAsync(CancellationToken ct)
+    {
+        await Gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            var nextRequest = new DateTime(Interlocked.Read(ref _nextRequestUtcTicks), DateTimeKind.Utc);
+            var delay = nextRequest - DateTime.UtcNow;
+            if (delay > TimeSpan.Zero)
+                await Task.Delay(delay, ct).ConfigureAwait(false);
+
+            Interlocked.Exchange(ref _nextRequestUtcTicks, DateTime.UtcNow.Add(MinimumInterval).Ticks);
+        }
+        finally
+        {
+            Gate.Release();
+        }
     }
 }

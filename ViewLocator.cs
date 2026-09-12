@@ -3,7 +3,9 @@ using System.Collections.Generic;
 using System.Diagnostics.CodeAnalysis;
 using Avalonia.Controls;
 using Avalonia.Controls.Templates;
+using MdModManager.Services;
 using MdModManager.ViewModels;
+using MdModManager.Views;
 
 namespace MdModManager;
 
@@ -54,6 +56,12 @@ public class ViewLocator : IDataTemplate
 
     private static Control? CreateView(Type viewModelType)
     {
+        if (viewModelType == typeof(WelcomeViewModel))
+        {
+            RuntimeLog.Write("ViewLocator", "正在创建 WelcomeView。");
+            return new WelcomeView();
+        }
+
         var name = viewModelType.FullName!.Replace("ViewModel", "View", StringComparison.Ordinal);
         var type = Type.GetType(name);
 

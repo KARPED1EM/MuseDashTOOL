@@ -168,6 +168,10 @@ public partial class MainWindowViewModel : ObservableObject
         _modUpdateService = modUpdateService;
         _betterMdConflictService = betterMdConflictService;
 
+        // 首帧直接提供欢迎页，不能依赖窗口 Opened 后的异步初始化。
+        CurrentPage = Ioc.Default.GetRequiredService<WelcomeViewModel>();
+        RuntimeLog.Write("MainWindowViewModel", "首屏已设置为 WelcomeViewModel。");
+
         // 当 HasPendingFiles 变化时，通知 UI 更新 HasStagedMods
         _stagingService.PropertyChanged += (_, e) =>
         {
@@ -267,22 +271,28 @@ public partial class MainWindowViewModel : ObservableObject
             await _configService.SaveAsync();
         }
 
-        // 默认进入欢迎页
-        CurrentPage = Ioc.Default.GetRequiredService<WelcomeViewModel>();
+        // 构造阶段已设置欢迎页；保留空页面兜底，避免初始化重入时出现内容区为空。
+        CurrentPage ??= Ioc.Default.GetRequiredService<WelcomeViewModel>();
 
-        if (string.IsNullOrEmpty(_configService.Config.GamePath) ||
-            !_gamePathService.IsValidGamePath(_configService.Config.GamePath))
+        var configuredGamePath = _configService.Config.GamePath;
+        var resolvedGamePath = await Task.Run(() =>
         {
-            var detectedPath = _gamePathService.DetectGamePath();
-            if (!string.IsNullOrEmpty(detectedPath))
-            {
-                _configService.Config.GamePath = detectedPath;
-                await _configService.SaveAsync();
-            }
+            if (_gamePathService.IsValidGamePath(configuredGamePath))
+                return configuredGamePath;
+
+            return _gamePathService.DetectGamePath();
+        });
+
+        var hasValidGamePath = !string.IsNullOrWhiteSpace(resolvedGamePath);
+        if (hasValidGamePath && !string.Equals(configuredGamePath, resolvedGamePath, System.StringComparison.OrdinalIgnoreCase))
+        {
+            _configService.Config.GamePath = resolvedGamePath!;
+            await _configService.SaveAsync();
         }
 
-        UpdateGamePathStatus();
-        CheckAndShowNotification();
+        RuntimeLog.Configure(hasValidGamePath ? resolvedGamePath : null);
+        UpdateGamePathStatus(hasValidGamePath);
+        CheckAndShowNotification(hasValidGamePath);
         UpdateBackground();
         UpdateTransparency();
         UpdateWindowOpacity();
@@ -307,9 +317,11 @@ public partial class MainWindowViewModel : ObservableObject
             }
         }
 
-        await CheckBetterMdConflictsAsync();
-
-        await ConvertLegacyCustomChartsAsync();
+        if (hasValidGamePath)
+        {
+            await CheckBetterMdConflictsAsync();
+            await ConvertLegacyCustomChartsAsync();
+        }
 
         // 异步尝试获取公告，但不阻塞主进程
         _ = TryShowAnnouncementAsync();
@@ -424,11 +436,11 @@ public partial class MainWindowViewModel : ObservableObject
         }
     }
 
-    private void UpdateGamePathStatus()
+    private void UpdateGamePathStatus(bool? isValidGamePath = null)
     {
         if (_configService != null && _gamePathService != null)
         {
-            GamePathStatus = _gamePathService.IsValidGamePath(_configService.Config.GamePath)
+            GamePathStatus = (isValidGamePath ?? _gamePathService.IsValidGamePath(_configService.Config.GamePath))
                 ? $"Game Path: {_configService.Config.GamePath}"
                 : "Game Path: Not Set or Invalid";
         }
@@ -848,14 +860,14 @@ public partial class MainWindowViewModel : ObservableObject
         BackgroundBlurRadius = _configService?.Config?.BackgroundBlurRadius ?? 0.0;
     }
 
-    private void CheckAndShowNotification()
+    private void CheckAndShowNotification(bool? isValidGamePath = null)
     {
         if (_notificationService == null || _configService == null || _gamePathService == null) return;
         
         _notificationService.ClearPersistentNotifications();
 
         var gamePath = _configService.Config.GamePath;
-        if (string.IsNullOrEmpty(gamePath) || !_gamePathService.IsValidGamePath(gamePath))
+        if (string.IsNullOrEmpty(gamePath) || !(isValidGamePath ?? _gamePathService.IsValidGamePath(gamePath)))
         {
             _notificationService.ShowInfo("未检测到游戏，请手动选择路径", -1);
         }

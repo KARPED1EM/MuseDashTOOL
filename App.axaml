@@ -2,9 +2,15 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
              x:Class="MdModManager.App"
              xmlns:local="using:MdModManager"
+             xmlns:views="using:MdModManager.Views"
+             xmlns:vm="using:MdModManager.ViewModels"
              RequestedThemeVariant="Dark">
 
     <Application.DataTemplates>
+        <!-- 首屏不通过反射定位，确保单文件发布时欢迎页也能直接创建。 -->
+        <DataTemplate DataType="vm:WelcomeViewModel">
+            <views:WelcomeView/>
+        </DataTemplate>
         <local:ViewLocator/>
     </Application.DataTemplates>
   

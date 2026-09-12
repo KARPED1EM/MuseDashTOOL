@@ -58,7 +58,7 @@ public sealed class AuthService : IAuthService
     private const string BaseUrl = "https://euterpe-org.com/api/";
     private const string AuthorizePageUrl = "https://euterpe-org.com/auth/app";
     private const string SuccessLandingUrl = "https://euterpe-org.com/auth/app/done";
-    private const string ClientId = "musedash-tool";
+    private const string ClientId = "euterpe-app";
     private static readonly TimeSpan AccessTokenLifetime = TimeSpan.FromMinutes(14);
     private static readonly TimeSpan LoginTimeout = TimeSpan.FromMinutes(5);
     
@@ -88,13 +88,11 @@ public sealed class AuthService : IAuthService
         _authState = authState;
         var handler = new XRequestIdHandler(new HttpClientHandler());
         _httpClient = new HttpClient(handler) { BaseAddress = new Uri(BaseUrl) };
-        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd("MuseDashTOOL/1.5.5");
+        _httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(EuterpeClientIdentity.UserAgent);
     }
 
     public async Task LoginAsync()
     {
-        // RFC 8252 native-app flow：本机起一个 loopback 监听，浏览器授权后
-        // 浏览器把授权码回跳到 127.0.0.1，全程不依赖自定义 URL scheme。
         var codeVerifier = GenerateCodeVerifier();
         var codeChallenge = ComputeCodeChallenge(codeVerifier);
         var state = GenerateState();
@@ -105,13 +103,11 @@ public sealed class AuthService : IAuthService
         {
             var port = ((IPEndPoint)listener.LocalEndpoint).Port;
             var redirectUri = $"http://127.0.0.1:{port}/callback";
-
             var authorizeUrl = BuildAuthorizeUrl(redirectUri, codeChallenge, state);
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(authorizeUrl) { UseShellExecute = true });
 
             using var cts = new CancellationTokenSource(LoginTimeout);
             var code = await ReceiveAuthorizationCodeAsync(listener, state, cts.Token);
-
             await CompleteLoginAsync(code, codeVerifier, redirectUri);
         }
         finally
@@ -120,7 +116,6 @@ public sealed class AuthService : IAuthService
         }
     }
 
-    // 拼装授权页 URL：展示名由服务端按 client_id 解析，客户端不自报。
     private static string BuildAuthorizeUrl(string redirectUri, string codeChallenge, string state)
     {
         var query = new StringBuilder();
@@ -130,62 +125,6 @@ public sealed class AuthService : IAuthService
         query.Append("&code_challenge_method=S256");
         query.Append("&state=").Append(Uri.EscapeDataString(state));
         return $"{AuthorizePageUrl}?{query}";
-    }
-
-    // 接收单个 loopback 回调：成功 302 到落地页，失败回 400 本地处理。
-    private static async Task<string> ReceiveAuthorizationCodeAsync(TcpListener listener, string expectedState, CancellationToken ct)
-    {
-        using var client = await listener.AcceptTcpClientAsync(ct);
-        await using var stream = client.GetStream();
-
-        var buffer = new byte[8192];
-        var read = await stream.ReadAsync(buffer, ct);
-        var requestLine = Encoding.ASCII.GetString(buffer, 0, read).Split("\r\n", 2)[0];
-
-        var queryParams = HttpUtility.ParseQueryString(ExtractQuery(requestLine));
-        var code = queryParams["code"];
-        var returnedState = queryParams["state"];
-        var error = queryParams["error"];
-
-        var success = string.IsNullOrEmpty(error)
-            && !string.IsNullOrEmpty(code)
-            && FixedTimeEquals(returnedState, expectedState);
-
-        var response = success
-            ? $"HTTP/1.1 302 Found\r\nLocation: {SuccessLandingUrl}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-            : "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\n登录失败，请返回应用重试。";
-        var responseBytes = Encoding.UTF8.GetBytes(response);
-        await stream.WriteAsync(responseBytes, ct);
-        await stream.FlushAsync(ct);
-
-        if (!string.IsNullOrEmpty(error))
-        {
-            var description = queryParams["error_description"];
-            throw new InvalidOperationException(string.IsNullOrEmpty(description) ? error : $"{error}: {description}");
-        }
-        if (string.IsNullOrEmpty(code))
-        {
-            throw new InvalidOperationException("回调缺少授权码");
-        }
-        if (!FixedTimeEquals(returnedState, expectedState))
-        {
-            throw new InvalidOperationException("state 校验失败，疑似伪造回调");
-        }
-
-        return code;
-    }
-
-    // 从请求行 "GET /callback?<query> HTTP/1.1" 取出 query 串。
-    private static string ExtractQuery(string requestLine)
-    {
-        var parts = requestLine.Split(' ');
-        if (parts.Length < 2)
-        {
-            return string.Empty;
-        }
-        var path = parts[1];
-        var index = path.IndexOf('?');
-        return index >= 0 ? path[(index + 1)..] : string.Empty;
     }
 
     private static string GenerateCodeVerifier() => Base64UrlEncode(RandomNumberGenerator.GetBytes(32));
@@ -201,9 +140,7 @@ public sealed class AuthService : IAuthService
     private static bool FixedTimeEquals(string? a, string? b)
     {
         if (a == null || b == null)
-        {
             return false;
-        }
         return CryptographicOperations.FixedTimeEquals(Encoding.UTF8.GetBytes(a), Encoding.UTF8.GetBytes(b));
     }
 
@@ -232,6 +169,46 @@ public sealed class AuthService : IAuthService
         {
             _lock.Release();
         }
+    }
+
+    private static async Task<string> ReceiveAuthorizationCodeAsync(TcpListener listener, string expectedState, CancellationToken ct)
+    {
+        using var client = await listener.AcceptTcpClientAsync(ct);
+        await using var stream = client.GetStream();
+        var buffer = new byte[8192];
+        var read = await stream.ReadAsync(buffer, ct);
+        var requestLine = Encoding.ASCII.GetString(buffer, 0, read).Split("\r\n", 2)[0];
+        var queryParams = HttpUtility.ParseQueryString(ExtractQuery(requestLine));
+        var code = queryParams["code"];
+        var returnedState = queryParams["state"];
+        var error = queryParams["error"];
+        var success = string.IsNullOrEmpty(error)
+            && !string.IsNullOrEmpty(code)
+            && FixedTimeEquals(returnedState, expectedState);
+        var response = success
+            ? $"HTTP/1.1 302 Found\r\nLocation: {SuccessLandingUrl}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+            : "HTTP/1.1 400 Bad Request\r\nContent-Type: text/plain; charset=utf-8\r\nConnection: close\r\n\r\n登录失败，请返回应用重试。";
+        await stream.WriteAsync(Encoding.UTF8.GetBytes(response), ct);
+        await stream.FlushAsync(ct);
+        if (!string.IsNullOrEmpty(error))
+        {
+            var description = queryParams["error_description"];
+            throw new InvalidOperationException(string.IsNullOrEmpty(description) ? error : $"{error}: {description}");
+        }
+        if (string.IsNullOrEmpty(code))
+            throw new InvalidOperationException("回调缺少授权码");
+        if (!FixedTimeEquals(returnedState, expectedState))
+            throw new InvalidOperationException("state 校验失败，疑似伪造回调");
+        return code;
+    }
+
+    private static string ExtractQuery(string requestLine)
+    {
+        var parts = requestLine.Split(' ');
+        if (parts.Length < 2)
+            return string.Empty;
+        var index = parts[1].IndexOf('?');
+        return index >= 0 ? parts[1][(index + 1)..] : string.Empty;
     }
 
     private async Task CompleteLoginAsync(string code, string codeVerifier, string redirectUri)

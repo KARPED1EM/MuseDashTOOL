@@ -227,8 +227,10 @@ public class DownloadManagerService : IDownloadManagerService, IDisposable
             UpdateDownloadInfo(item);
 
             int retryCount = 0;
+            var isEuterpeDownload = EuterpeChartDownloadService.TryGetCid(item.Chart.DownloadUrl, out _);
             var useOptimizedIpStrategy = UsesOptimizedIpStrategy(item.Chart.DownloadUrl);
-            var maxRetryCount = useOptimizedIpStrategy ? 10 : 3;
+            // Euterpe 服务内部已限定为“文件服务一次、ZIP 构建一次”，不能再由通用下载器重复请求。
+            var maxRetryCount = isEuterpeDownload ? 0 : (useOptimizedIpStrategy ? 10 : 3);
 
             while (retryCount <= maxRetryCount)
             {

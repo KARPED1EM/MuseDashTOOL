@@ -24,7 +24,7 @@ public sealed class GlobalChartSearchService : IGlobalChartSearchService
     private const int EuterpeFetchSize = 50;
     private const int EuterpeSearchPages = 2;
     private const long EuterpeOfficialUserUid = 0;
-    private const string EuterpeBrowserUserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+    private const string EuterpeUserAgent = EuterpeClientIdentity.UserAgent;
     private static readonly TimeSpan OfficialUserChartsQuickWait = TimeSpan.FromMilliseconds(800);
     private static readonly SemaphoreSlim OfficialUserChartsLock = new(1, 1);
     private static readonly string[] EuterpeSearchSorts = { "recommended" };
@@ -47,7 +47,7 @@ public sealed class GlobalChartSearchService : IGlobalChartSearchService
         _authState = authState;
         _euterpeClient = new HttpClient(authHeaderHandler) { BaseAddress = new Uri("https://euterpe-org.com/api/") };
         // Euterpe 搜索接口只有浏览器 UA 会返回网页同款谱面集合。
-        _euterpeClient.DefaultRequestHeaders.UserAgent.ParseAdd(EuterpeBrowserUserAgent);
+        _euterpeClient.DefaultRequestHeaders.UserAgent.ParseAdd(EuterpeUserAgent);
         StartOfficialUserChartsWarmup();
     }
 

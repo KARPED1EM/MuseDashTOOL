@@ -13,13 +13,13 @@ sealed class Program
         System.Threading.Mutex? mutex = null;
         try
         {
-            // 使用全局互斥锁以支持跨权限级别检测
-            mutex = new System.Threading.Mutex(true, "Global\\MuseDashTOOL-SingleInstance", out createdNew);
+            // 使用当前会话的互斥锁，避免受限账户没有 Global 命名空间权限时被误判为已有实例。
+            mutex = new System.Threading.Mutex(true, "Local\\MuseDashTOOL-SingleInstance", out createdNew);
         }
         catch (UnauthorizedAccessException)
         {
-            // 如果遇到权限拒绝说明已存在更高权限的实例运行
-            createdNew = false;
+            // 无法创建互斥锁时仍应允许主窗口启动，不能将权限问题伪装成已有实例。
+            createdNew = true;
         }
 
         if (!createdNew)
@@ -48,6 +48,12 @@ sealed class Program
     {
         var builder = AppBuilder.Configure<App>()
             .UsePlatformDetect()
+            // 部分旧显卡驱动会在 ANGLE 创建首个窗口时卡住，使用软件渲染保证窗口能创建。
+            .With(new Avalonia.Win32PlatformOptions
+            {
+                RenderingMode = [Avalonia.Win32RenderingMode.Software],
+                CompositionMode = [Avalonia.Win32CompositionMode.RedirectionSurface]
+            })
             .WithInterFont()
             .LogToTrace();
 

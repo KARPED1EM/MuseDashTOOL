@@ -109,18 +109,6 @@ public class ConfigService : IConfigService
             config.DownloadSource = MirrorDomainRegistry.SuzimoAlias;
         }
 
-        // 版本更新时重置教程弹窗
-        var currentVersion = typeof(AppConfig).Assembly.GetName().Version?.ToString() ?? "1.5.5";
-        if (config.LastRunVersion != currentVersion)
-        {
-            config.SuppressWelcomeTutorial = false;
-            config.SuppressModManagerTutorial = false;
-            config.SuppressChartManagerTutorial = false;
-            config.SuppressChartMigrationTutorial = false;
-            config.SuppressAlbumCollectionTutorial = false;
-            config.SuppressConfigManagerTutorial = false;
-            config.LastRunVersion = currentVersion;
-        }
     }
 
 }

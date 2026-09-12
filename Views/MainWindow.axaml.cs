@@ -16,13 +16,6 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
-        Loaded += async (s, e) =>
-        {
-            if (DataContext is MainWindowViewModel vm)
-            {
-                await vm.InitializeAsync();
-            }
-        };
 
         this.PointerPressed += (s, e) =>
         {
