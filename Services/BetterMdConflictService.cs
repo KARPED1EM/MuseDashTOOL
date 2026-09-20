@@ -17,7 +17,7 @@ public sealed class BetterMdConflictService
     // 基于 BetterMD 的不兼容声明，并补充已确认的实际冲突模组。
     private static readonly HashSet<string> IncompatibleAssemblyNames = new(StringComparer.OrdinalIgnoreCase)
     {
-        "AltTabMute", "Amalgamuse", "BackgroundRecorder", "BetterView", "Cinema",
+        "AccuracyIndicator", "AltTabMute", "Amalgamuse", "BackgroundRecorder", "BetterView", "Cinema",
         "CustomAlbums", "CustomBackgrounds", "Ensemble", "Euterpe",
         "FavGirl", "Headquarters", "HiddenQol", "HiddenQol_fixed", "Info+",
         "MuseDashEnsemble", "ModCombination", "OwnGirl", "RankTarget",
