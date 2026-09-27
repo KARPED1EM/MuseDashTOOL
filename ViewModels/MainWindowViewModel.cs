@@ -52,7 +52,7 @@ public partial class MainWindowViewModel : ObservableObject
     public bool HasStagedMods => _stagingService?.HasPendingFiles ?? false;
 
     // Euterpe 按钮显示的文本
-    public string EuterpeButtonText => "Euterpe";
+    public string EuterpeButtonText => "Eu谱面";
 
     // Euterpe 按钮的提示信息
     public string EuterpeButtonToolTip => MdModManager.Services.I18nService.Instance.CurrentLanguage == "en-US" ? "Manage Euterpe Account" : "点击管理 Euterpe 账号";
@@ -1274,17 +1274,6 @@ public partial class MainWindowViewModel : ObservableObject
     [RelayCommand]
     public async Task NavigateToEuterpeDownloadAsync()
     {
-        // 检查游戏内是否登录以防没有UID
-        if (!MuseDashAccountService.HasLoginUid())
-        {
-            if (Avalonia.Application.Current?.ApplicationLifetime is Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime desktop &&
-                desktop.MainWindow is MdModManager.Views.MainWindow mainWindow)
-            {
-                await mainWindow.ShowMessageBoxAsync("请先在喵斯快跑内登陆账号，再来下载Euterpe谱面吧~");
-            }
-            return;
-        }
-
         var state = Ioc.Default.GetRequiredService<AuthState>();
         if (state.CurrentUser == null)
         {
