@@ -144,6 +144,15 @@ public sealed partial class GlobalChartSearchViewModel : ObservableObject, IDisp
 
     public async Task OpenMdenSearchAsync(MdenGlobalSearchRequest request)
     {
+        if (_mdenSearchRequest == request &&
+            string.Equals(SearchText, request.Query, StringComparison.OrdinalIgnoreCase) &&
+            _searchCts is { IsCancellationRequested: false } &&
+            (IsLoading || _allResults.Count > 0))
+        {
+            RuntimeLog.Write("GlobalSearchVM", "忽略重复的缺谱搜索请求。");
+            return;
+        }
+
         _mdenSearchRequest = request;
         _mdenAutoDownloadStarted = false;
         _mdenCandidateStatus = string.Empty;

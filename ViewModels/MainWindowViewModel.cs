@@ -28,6 +28,8 @@ public partial class MainWindowViewModel : ObservableObject
     private bool _isInitialized;
     private bool _hasCheckedBetterMdConflicts;
     private MdenGlobalSearchRequest? _pendingGlobalSearchRequest;
+    private MdenGlobalSearchRequest? _queuedGlobalSearchRequest;
+    private bool _isHandlingGlobalSearchRequest;
 
     [ObservableProperty]
     private object? _currentPage;
@@ -247,13 +249,38 @@ public partial class MainWindowViewModel : ObservableObject
 
     private async Task NavigateToGlobalChartSearchWithRequestAsync(MdenGlobalSearchRequest request)
     {
-        CleanupCurrentPage();
-        IsChartDownloadMenuExpanded = true;
+        // 连续外部跳转只保留最新请求，避免释放仍在搜索的页面。
+        _queuedGlobalSearchRequest = request;
+        if (_isHandlingGlobalSearchRequest)
+            return;
 
-        var vm = Ioc.Default.GetRequiredService<GlobalChartSearchViewModel>();
-        CurrentPage = vm;
-        await vm.InitializeAsync(_currentPageCts!.Token);
-        await vm.OpenMdenSearchAsync(request);
+        _isHandlingGlobalSearchRequest = true;
+        try
+        {
+            while (_queuedGlobalSearchRequest is { } nextRequest)
+            {
+                _queuedGlobalSearchRequest = null;
+                var vm = Ioc.Default.GetRequiredService<GlobalChartSearchViewModel>();
+                if (!ReferenceEquals(CurrentPage, vm))
+                {
+                    CleanupCurrentPage();
+                    CurrentPage = vm;
+                    await vm.InitializeAsync(_currentPageCts!.Token);
+                }
+
+                IsChartDownloadMenuExpanded = true;
+                await vm.OpenMdenSearchAsync(nextRequest);
+            }
+        }
+        catch (Exception ex)
+        {
+            RuntimeLog.Write("MainWindowViewModel", $"缺谱搜索跳转失败：{ex}");
+            _notificationService?.ShowFailure("缺谱搜索失败", ex.Message);
+        }
+        finally
+        {
+            _isHandlingGlobalSearchRequest = false;
+        }
     }
 
     public async Task InitializeAsync()

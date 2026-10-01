@@ -436,7 +436,7 @@ public partial class OnlineLobbyViewModel : ViewModelBase, IDisposable
         room.HostUid = lobby.HostUid ?? "";
         room.HostName = lobby.HostName ?? "";
         room.MaxPlayers = lobby.MaxPlayers;
-        room.PlayerCount = lobby.Players?.Length ?? 0;
+        room.PlayerCount = lobby.PlayerCount ?? lobby.Players?.Length ?? 0;
         room.PlaylistSize = lobby.PlaylistSize;
         room.PlaylistCount = lobby.PlaylistCount;
         room.IsPrivate = lobby.IsPrivate;

@@ -5,7 +5,7 @@ namespace MdModManager.Services;
 
 public static class EuterpeClientIdentity
 {
-    public const string UserAgent = "Euterpe";
+    public const string UserAgent = "MuseDashTOOL/1.5.5";
 }
 
 public sealed class EuterpeHttpException : HttpRequestException

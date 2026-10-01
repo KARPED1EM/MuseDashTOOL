@@ -37,7 +37,7 @@ public record CurrentUserResponse(EuterpeUserInfo User);
 public record MuseDashUidRequest(string Uid);
 
 // 序列化本地文件载荷
-public record TokenPayload(string AccessToken, string RefreshToken);
+public record TokenPayload(string AccessToken, string RefreshToken, string? ClientId = null);
 
 // 序列化上下文
 [JsonSourceGenerationOptions(PropertyNamingPolicy = JsonKnownNamingPolicy.SnakeCaseLower)]
@@ -58,7 +58,7 @@ public sealed class AuthService : IAuthService
     private const string BaseUrl = "https://euterpe-org.com/api/";
     private const string AuthorizePageUrl = "https://euterpe-org.com/auth/app";
     private const string SuccessLandingUrl = "https://euterpe-org.com/auth/app/done";
-    private const string ClientId = "euterpe-app";
+    private const string ClientId = "musedash-tool";
     private static readonly TimeSpan AccessTokenLifetime = TimeSpan.FromMinutes(14);
     private static readonly TimeSpan LoginTimeout = TimeSpan.FromMinutes(5);
     
@@ -402,7 +402,7 @@ public sealed class AuthService : IAuthService
                 Directory.CreateDirectory(dir);
             }
 
-            var payload = new TokenPayload(accessToken, refreshToken);
+            var payload = new TokenPayload(accessToken, refreshToken, ClientId);
             var json = JsonSerializer.Serialize(payload, EuterpeJsonContext.Default.TokenPayload);
             var plainBytes = Encoding.UTF8.GetBytes(json);
             var encrypted = ProtectedData.Protect(plainBytes, null, DataProtectionScope.CurrentUser);
@@ -429,7 +429,8 @@ public sealed class AuthService : IAuthService
             var json = Encoding.UTF8.GetString(plainBytes);
             var payload = JsonSerializer.Deserialize(json, EuterpeJsonContext.Default.TokenPayload);
 
-            if (payload == null || string.IsNullOrEmpty(payload.AccessToken) || string.IsNullOrEmpty(payload.RefreshToken))
+            // 旧凭据未记录客户端身份，需重新授权，避免继续使用 Euterpe APP 的令牌。
+            if (payload == null || payload.ClientId != ClientId || string.IsNullOrEmpty(payload.AccessToken) || string.IsNullOrEmpty(payload.RefreshToken))
             {
                 await ClearTokensAsync();
                 return null;

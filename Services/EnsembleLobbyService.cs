@@ -78,10 +78,12 @@ public sealed class EnsembleLobbyService : IEnsembleLobbyService
                 observeNonce,
                 MdtObserverAuth.DefaultSharedSecret);
 
-            await connection.SendRequestAsync<MdtObserveRequest, MdtObserveResponse>(
+            var observed = await connection.SendRequestAsync<MdtObserveRequest, MdtObserveResponse>(
                 OpCodes.MdtObserveReq,
                 new MdtObserveRequest
                 {
+                    SupportsLobbySummaries = true,
+                    SupportsSnapshotDeltas = true,
                     Uid = normalizedUid,
                     ClientName = senderName,
                     TimestampUnixMs = observeTimestamp,
@@ -91,6 +93,8 @@ public sealed class EnsembleLobbyService : IEnsembleLobbyService
                 ct).ConfigureAwait(false);
 
             NodeStatusChanged?.Invoke(key, "已连接", true);
+
+            if (observed?.SupportsSnapshotDeltas == true) return;
 
             var snapshot = await connection.SendRequestAsync<MdtGetLobbySnapshotRequest, MdtGetLobbySnapshotResponse>(
                 OpCodes.MdtGetLobbySnapshotReq,
@@ -190,7 +194,29 @@ public sealed class EnsembleLobbyService : IEnsembleLobbyService
                 var push = payload.Deserialize(EnsembleProtocolJsonContext.Default.MdtLobbySnapshotPush);
                 if (push?.Snapshot != null)
                 {
-                    SnapshotReceived?.Invoke(nodeId, push.Snapshot);
+                    if (_connections.TryGetValue(nodeId, out var connection))
+                    {
+                        connection.SnapshotBaseline = push.Snapshot;
+                        connection.SnapshotRevision = push.Revision;
+                        connection.SnapshotResyncRequested = false;
+                    }
+                    SnapshotReceived?.Invoke(nodeId, MdtSnapshotCodec.ExpandPlaylistOwners(push.Snapshot));
+                }
+                else if (push?.Delta != null && _connections.TryGetValue(nodeId, out var connection))
+                {
+                    if (connection.SnapshotBaseline != null &&
+                        MdtSnapshotCodec.TryApply(connection.SnapshotBaseline, connection.SnapshotRevision,
+                        push.Delta, out var snapshot))
+                    {
+                        connection.SnapshotBaseline = snapshot;
+                        connection.SnapshotRevision = push.Delta.Revision;
+                        SnapshotReceived?.Invoke(nodeId, MdtSnapshotCodec.ExpandPlaylistOwners(snapshot));
+                    }
+                    else if (!connection.SnapshotResyncRequested)
+                    {
+                        connection.SnapshotResyncRequested = true;
+                        _ = RequestSnapshotResyncAsync(connection);
+                    }
                 }
             }
             else if (opCode == OpCodes.MdtChatPush)
@@ -220,6 +246,21 @@ public sealed class EnsembleLobbyService : IEnsembleLobbyService
     {
         NodeStatusChanged?.Invoke(nodeId, reason, false);
         _connections.TryRemove(nodeId, out _);
+    }
+
+    private static async Task RequestSnapshotResyncAsync(NodeConnection connection)
+    {
+        try
+        {
+            await connection.SendRequestAsync<MdtGetLobbySnapshotRequest, MdtGetLobbySnapshotResponse>(
+                OpCodes.MdtGetLobbySnapshotReq, new MdtGetLobbySnapshotRequest { ResetDelta = true },
+                CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            connection.SnapshotResyncRequested = false;
+            RuntimeLog.Write("EnsembleLobbyService", $"补全快照失败: {ex.Message}");
+        }
     }
 
     private static string GetNodeKey(EnsembleLobbyNodeConfig node)
@@ -295,6 +336,9 @@ public sealed class EnsembleLobbyService : IEnsembleLobbyService
         }
 
         public string SenderName { get; }
+        public MdtLobbySnapshot? SnapshotBaseline { get; set; }
+        public long SnapshotRevision { get; set; }
+        public bool SnapshotResyncRequested { get; set; }
         public bool IsConnected => _client?.Connected == true && _stream != null && !_disposed;
 
         public async Task ConnectAsync(string host, int port, CancellationToken ct)

@@ -152,7 +152,7 @@ public partial class EnsembleLobbyRoom : ObservableObject
     public string HostText => string.Format(I18nService.Instance["OnlineLobby_HostFormat"], HostName);
     public string PlaylistText => $"{PlaylistCount}/{PlaylistSize}";
     public string PlaylistLabelText => string.Format(I18nService.Instance["OnlineLobby_PlaylistFormat"], PlaylistText);
-    public string PlayerCountText => $"{PlayerCount}/{MaxPlayers}";
+    public string PlayerCountText => string.Format(I18nService.Instance["OnlineLobby_PlayerCount"], PlayerCount);
     public string WatcherText => WatcherCount > 0
         ? string.Format(I18nService.Instance["OnlineLobby_WatcherCount"], WatcherCount)
         : I18nService.Instance["OnlineLobby_NoWatchers"];
@@ -199,7 +199,6 @@ public partial class EnsembleLobbyRoom : ObservableObject
         OnPropertyChanged(nameof(PlaylistLabelText));
     }
     partial void OnPlayerCountChanged(int value) => OnPropertyChanged(nameof(PlayerCountText));
-    partial void OnMaxPlayersChanged(ushort value) => OnPropertyChanged(nameof(PlayerCountText));
     partial void OnWatcherCountChanged(int value) => OnPropertyChanged(nameof(WatcherText));
 
     public void RefreshLocalizedText()
@@ -208,6 +207,7 @@ public partial class EnsembleLobbyRoom : ObservableObject
         OnPropertyChanged(nameof(PrivacyText));
         OnPropertyChanged(nameof(HostText));
         OnPropertyChanged(nameof(PlaylistLabelText));
+        OnPropertyChanged(nameof(PlayerCountText));
         OnPropertyChanged(nameof(WatcherText));
         foreach (var player in Players)
         {
@@ -260,7 +260,8 @@ public partial class EnsembleLobbyPlayer : ObservableObject
         "焚海魔盗凛",
         "潜水员布若",
         "made by Ora 2马莉嘉",
-        "幽灵玛莉嘉"
+        "幽灵玛莉嘉",
+        "凛·双面怪盗"
     };
 
     private static readonly string[] ElfinNames =
@@ -327,6 +328,9 @@ public partial class EnsembleLobbyPlayer : ObservableObject
 
     private static string ResolveElfinName(int index)
     {
+        if (index == -1)
+            return I18nService.Instance["OnlineLobby_NoElfin"];
+
         return index >= 0 && index < ElfinNames.Length
             ? ElfinNames[index]
             : string.Format(I18nService.Instance["OnlineLobby_UnknownElfin"], index);
